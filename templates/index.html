@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADS-B LOS Calculator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ADS-B Line of Sight Calculator</h1>
+            <div class="status" id="status">
+                <span class="status-icon">●</span>
+                <span id="status-text">Loading...</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="carrier-selection">
+                <h2>
+                    <span class="icon">✈</span>
+                    Carrier Selection
+                </h2>
+                <div class="carrier-list" id="carrier-list">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </section>
+
+            <section class="configuration">
+                <h2>
+                    <span class="icon">⚙</span>
+                    Configuration
+                </h2>
+                <div class="config-panel" id="config-panel">
+                    <!-- Carrier-specific ranges populated by JavaScript -->
+                </div>
+            </section>
+
+            <section class="visualization">
+                <h2>
+                    <span class="icon">📊</span>
+                    Distance Distribution
+                </h2>
+                <div class="chart-container">
+                    <canvas id="distance-chart"></canvas>
+                </div>
+            </section>
+
+            <section class="visualization">
+                <h2>
+                    <span class="icon">🔗</span>
+                    Connection Distribution
+                </h2>
+                <div class="chart-container">
+                    <canvas id="connection-chart"></canvas>
+                </div>
+            </section>
+
+            <section class="statistics">
+                <h2>
+                    <span class="icon">📡</span>
+                    Communication Statistics
+                </h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">📡</div>
+                        <div class="stat-label">Direct</div>
+                        <div class="stat-value" id="stat-direct">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔄</div>
+                        <div class="stat-label">1-Hop</div>
+                        <div class="stat-value" id="stat-1hop">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔄</div>
+                        <div class="stat-label">2-Hop</div>
+                        <div class="stat-value" id="stat-2hop">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔄</div>
+                        <div class="stat-label">3-Hop</div>
+                        <div class="stat-value" id="stat-3hop">0</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="graph-visualization">
+                <h2>
+                    <span class="icon">🕸️</span>
+                    Connection Graph
+                </h2>
+                <div class="graph-container" id="graph-container">
+                    <svg id="graph-svg"></svg>
+                    <div class="graph-legend">
+                        <div class="legend-item">
+                            <span class="legend-line thick"></span>
+                            <span>Short distance (thick)</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-line thin"></span>
+                            <span>Long distance (thin)</span>
+                        </div>
+                        <div class="legend-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                            <span style="font-size: 11px; color: var(--text-secondary);">💡 Scroll to zoom, drag to pan</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="graph-visualization">
+                <h2>
+                    <span class="icon">🗺️</span>
+                    Geospatial Network Graph
+                </h2>
+                <div class="graph-container" id="geo-graph-container">
+                    <svg id="geo-graph-svg"></svg>
+                    <div class="graph-legend">
+                        <div class="legend-item">
+                            <span class="legend-line thick"></span>
+                            <span>Short distance (thick)</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-line thin"></span>
+                            <span>Long distance (thin)</span>
+                        </div>
+                        <div class="legend-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                            <span style="font-size: 11px; color: var(--text-secondary);">💡 Scroll to zoom, drag to pan</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
