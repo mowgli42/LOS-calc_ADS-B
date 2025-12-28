@@ -2,6 +2,9 @@
 
 A minimalistic web interface for calculating line-of-sight distances between aircraft from ADS-B data and analyzing multi-hop communication paths.
 
+<img width="1256" height="2220" alt="ADS-B LOS Calculator" src="https://github.com/user-attachments/assets/b9cc1a33-cc9a-4e0e-82d7-8525286d4cc7" />
+
+
 ## Features
 
 - Real-time aircraft data ingestion from OpenSky Network API
