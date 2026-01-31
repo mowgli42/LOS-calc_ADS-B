@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADS-B LOS Calculator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ADS-B Line of Sight Calculator</h1>
+            <div class="header-status-group">
+                <div class="status" id="status">
+                    <span class="status-icon">●</span>
+                    <span id="status-text">Loading...</span>
+                </div>
+                <div class="status los-api-status" id="los-api-status">
+                    <span class="status-icon" id="los-api-status-icon">●</span>
+                    <span id="los-api-status-text">Checking...</span>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="carrier-selection">
+                <h2 class="expandable-header" id="carrier-selection-header">
+                    <span class="header-title-group">
+                        <span class="caret-icon">▼</span>
+                        <span class="icon">✈</span>
+                        Carrier Selection & Configuration
+                    </span>
+                    <span class="selected-carriers-badge" id="selected-carriers-badge"></span>
+                </h2>
+                <div class="expandable-content" id="carrier-selection-content">
+                    <div class="carrier-list" id="carrier-list">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                    <div class="airport-toggle-container" style="border-top: 1px solid var(--border-color);">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="include-airports-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">Include Top 50 Airports in LOS Analysis</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <section class="map-visualization">
+                <h2>
+                    <span class="icon">🌍</span>
+                    Aircraft Map
+                </h2>
+                <div class="map-container" id="map-container">
+                    <div id="map"></div>
+                </div>
+            </section>
+
+            <section class="range-sensitivity">
+                <h2>
+                    <span class="icon">📉</span>
+                    Range Sensitivity Analysis
+                </h2>
+                <p class="section-description">
+                    Shows how network connectivity changes with different communication range settings.
+                    Helps identify optimal range for maximizing connections.
+                </p>
+                <div class="chart-container">
+                    <div id="range-sensitivity-chart" style="width: 100%; height: 500px;"></div>
+                </div>
+            </section>
+
+            <section class="statistics">
+                <h2>
+                    <span class="icon">📡</span>
+                    Connection Statistics
+                </h2>
+                <div class="stats-table-container">
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    <span class="stat-icon">📡</span>
+                                    <span>Direct</span>
+                                </th>
+                                <th>
+                                    <span class="stat-icon">🔄</span>
+                                    <span>1-Hop</span>
+                                </th>
+                                <th>
+                                    <span class="stat-icon">🔄</span>
+                                    <span>2-Hop</span>
+                                </th>
+                                <th>
+                                    <span class="stat-icon">🔄</span>
+                                    <span>3-Hop</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="stat-value" id="stat-direct">0</td>
+                                <td class="stat-value" id="stat-1hop">0</td>
+                                <td class="stat-value" id="stat-2hop">0</td>
+                                <td class="stat-value" id="stat-3hop">0</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="visualization">
+                <h2>
+                    <span class="icon">🔗</span>
+                    Connection Distribution
+                </h2>
+                <div class="chart-container">
+                    <div id="connection-chart"></div>
+                </div>
+            </section>
+
+            <section class="graph-visualization">
+                <h2>
+                    <span class="icon">🕸️</span>
+                    Connection Graph
+                </h2>
+                <div class="graph-container" id="graph-container">
+                    <svg id="graph-svg"></svg>
+                    <div class="graph-legend">
+                        <div class="legend-item">
+                            <span class="legend-line thick"></span>
+                            <span>Short distance (thick)</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-line thin"></span>
+                            <span>Long distance (thin)</span>
+                        </div>
+                        <div class="legend-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                            <span style="font-size: 11px; color: var(--text-secondary);">💡 Scroll to zoom, drag to pan</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="los-metrics">
+                <h2>
+                    <span class="icon">📈</span>
+                    LOS Metrics
+                    <div class="los-status" id="los-status" style="margin-left: auto;">
+                        <span class="los-status-icon">●</span>
+                        <span class="los-status-text" id="los-status-text">Calculating...</span>
+                    </div>
+                </h2>
+                <div class="metrics-grid">
+                    <div class="metrics-panel">
+                        <h3>Coverage Metrics</h3>
+                        <div class="metric-item">
+                            <span class="metric-label">Total Pairs:</span>
+                            <span class="metric-value" id="metric-total-pairs">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">LOS Pairs:</span>
+                            <span class="metric-value" id="metric-los-pairs">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">LOS Percentage:</span>
+                            <span class="metric-value" id="metric-los-percentage">0%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Avg LOS Distance:</span>
+                            <span class="metric-value" id="metric-avg-los-distance">0 km</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Min LOS Distance:</span>
+                            <span class="metric-value" id="metric-min-los-distance">0 km</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Max LOS Distance:</span>
+                            <span class="metric-value" id="metric-max-los-distance">0 km</span>
+                        </div>
+                    </div>
+                    <div class="metrics-panel">
+                        <h3>Connectivity Metrics</h3>
+                        <div class="metric-item">
+                            <span class="metric-label">Graph Density:</span>
+                            <span class="metric-value" id="metric-graph-density">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Avg Node Degree:</span>
+                            <span class="metric-value" id="metric-avg-degree">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Clustering Coeff:</span>
+                            <span class="metric-value" id="metric-clustering">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Components:</span>
+                            <span class="metric-value" id="metric-components">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Largest Component:</span>
+                            <span class="metric-value" id="metric-largest-component">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Avg Path Length:</span>
+                            <span class="metric-value" id="metric-path-length">0</span>
+                        </div>
+                    </div>
+                    <div class="metrics-panel">
+                        <h3>Geographic Metrics</h3>
+                        <div class="metric-item">
+                            <span class="metric-label">Avg Altitude:</span>
+                            <span class="metric-value" id="metric-avg-altitude">0 km</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Avg Altitude Diff:</span>
+                            <span class="metric-value" id="metric-avg-altitude-diff">0 km</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Low Altitude (0-6km):</span>
+                            <span class="metric-value" id="metric-low-altitude">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Medium Altitude (6-12km):</span>
+                            <span class="metric-value" id="metric-medium-altitude">0</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">High Altitude (12km+):</span>
+                            <span class="metric-value" id="metric-high-altitude">0</span>
+                        </div>
+                        <div class="metric-item" id="metric-bounding-box-container" style="display: none;">
+                            <span class="metric-label">Bounding Box:</span>
+                            <span class="metric-value" id="metric-bounding-box">-</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="connectivity-analysis">
+                <h2>
+                    <span class="icon">📊</span>
+                    Multi-Hop Connectivity Analysis
+                </h2>
+                <div class="chart-container">
+                    <div id="connectivity-curve-chart" style="width: 100%; height: 400px;"></div>
+                </div>
+                <div class="chart-container" style="margin-top: 20px;">
+                    <div id="marginal-improvement-chart" style="width: 100%; height: 300px;"></div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
