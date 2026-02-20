@@ -18,6 +18,11 @@ from config import (
     DEFAULT_COMMUNICATION_RANGE_KM,
     TOP_50_AIRPORTS
 )
+from radio_nets import (
+    create_net, update_net, get_net, list_nets, delete_net,
+    create_node, update_node, get_node, list_nodes, delete_node,
+    get_net_connectivity, get_compliance_status, get_non_compliant_nodes,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -657,6 +662,131 @@ def get_range_sensitivity():
     except Exception as e:
         logger.error(f"Error calculating range sensitivity: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+# --- Radio Net Configuration API ---
+
+@app.route('/api/radio-nets', methods=['GET'])
+def api_list_nets():
+    """List all radio nets."""
+    nets = list_nets()
+    return jsonify({'nets': nets})
+
+
+@app.route('/api/radio-nets', methods=['POST'])
+def api_create_net():
+    """Create a radio net. Body: {name, frequency_mhz, band?, description?}."""
+    data = request.get_json() or {}
+    name = data.get('name')
+    frequency_mhz = data.get('frequency_mhz')
+    if not name or frequency_mhz is None:
+        return jsonify({'error': 'name and frequency_mhz required'}), 400
+    try:
+        frequency_mhz = float(frequency_mhz)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'frequency_mhz must be numeric'}), 400
+    net = create_net(
+        name=str(name),
+        frequency_mhz=frequency_mhz,
+        band=str(data.get('band', 'VHF')),
+        description=str(data.get('description', '')),
+    )
+    return jsonify(net), 201
+
+
+@app.route('/api/radio-nets/<net_id>', methods=['GET'])
+def api_get_net(net_id):
+    """Get a radio net by ID."""
+    net = get_net(net_id)
+    if not net:
+        return jsonify({'error': 'Net not found'}), 404
+    return jsonify(net)
+
+
+@app.route('/api/radio-nets/<net_id>', methods=['PUT'])
+def api_update_net(net_id):
+    """Update a radio net. Body: {name?, frequency_mhz?, band?, description?}."""
+    data = request.get_json() or {}
+    allowed = {k: data[k] for k in ('name', 'frequency_mhz', 'band', 'description') if k in data}
+    net = update_net(net_id, **allowed)
+    if not net:
+        return jsonify({'error': 'Net not found'}), 404
+    return jsonify(net)
+
+
+@app.route('/api/radio-nets/<net_id>', methods=['DELETE'])
+def api_delete_net(net_id):
+    """Delete a radio net."""
+    if not delete_net(net_id):
+        return jsonify({'error': 'Net not found'}), 404
+    return jsonify({'deleted': net_id})
+
+
+@app.route('/api/radio-nodes', methods=['GET'])
+def api_list_nodes():
+    """List all radio nodes."""
+    nodes = list_nodes()
+    return jsonify({'nodes': nodes})
+
+
+@app.route('/api/radio-nodes', methods=['POST'])
+def api_create_node():
+    """Create a radio node. Body: {label, configured_nets?, assigned_nets?, frequency_capability?}."""
+    data = request.get_json() or {}
+    label = data.get('label', '')
+    node = create_node(
+        label=str(label),
+        configured_nets=data.get('configured_nets', []),
+        assigned_nets=data.get('assigned_nets', []),
+        frequency_capability=data.get('frequency_capability', []),
+    )
+    return jsonify(node), 201
+
+
+@app.route('/api/radio-nodes/<node_id>', methods=['GET'])
+def api_get_node(node_id):
+    """Get a radio node by ID."""
+    node = get_node(node_id)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    return jsonify(node)
+
+
+@app.route('/api/radio-nodes/<node_id>', methods=['PUT'])
+def api_update_node(node_id):
+    """Update a radio node. Body: {label?, configured_nets?, assigned_nets?, frequency_capability?}."""
+    data = request.get_json() or {}
+    allowed = {k: data[k] for k in ('label', 'configured_nets', 'assigned_nets', 'frequency_capability') if k in data}
+    node = update_node(node_id, **allowed)
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    return jsonify(node)
+
+
+@app.route('/api/radio-nodes/<node_id>', methods=['DELETE'])
+def api_delete_node(node_id):
+    """Delete a radio node."""
+    if not delete_node(node_id):
+        return jsonify({'error': 'Node not found'}), 404
+    return jsonify({'deleted': node_id})
+
+
+@app.route('/api/radio-nets/connectivity', methods=['GET'])
+def api_net_connectivity():
+    """Get net connectivity: which nets are connected, bridge nodes, connected groups."""
+    return jsonify(get_net_connectivity())
+
+
+@app.route('/api/radio-nets/compliance', methods=['GET'])
+def api_compliance_status():
+    """Get compliance status per net and per node."""
+    return jsonify(get_compliance_status())
+
+
+@app.route('/api/radio-nets/non-compliant', methods=['GET'])
+def api_non_compliant_nodes():
+    """List radios not set up to join their assigned nets."""
+    return jsonify({'non_compliant': get_non_compliant_nodes()})
 
 
 if __name__ == '__main__':

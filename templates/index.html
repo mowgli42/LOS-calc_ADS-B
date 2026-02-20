@@ -253,6 +253,101 @@
                 </div>
             </section>
 
+            <section class="radio-net-configuration">
+                <h2>
+                    <span class="icon">📻</span>
+                    Radio Net Configuration
+                </h2>
+                <p class="section-description">
+                    Manage shared nets, nodes (radios), net connectivity, and identify radios not configured to join assigned nets.
+                </p>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Nets</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-net">Add Net</button>
+                        </div>
+                        <div id="radio-net-list" class="radio-net-list"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Nodes (Radios)</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-node">Add Node</button>
+                        </div>
+                        <div id="radio-node-list" class="radio-net-list"></div>
+                    </div>
+                </div>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Net Connectivity</h3>
+                        <p class="radio-net-help">Nets connected via shared nodes (bridge radios)</p>
+                        <div id="radio-net-connectivity" class="radio-net-content"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Non-Compliant Radios</h3>
+                        <p class="radio-net-help">Radios assigned to nets but not configured</p>
+                        <div id="radio-net-non-compliant" class="radio-net-content"></div>
+                    </div>
+                </div>
+                <!-- Modal for add/edit net -->
+                <div id="modal-net" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3 id="modal-net-title">Add Net</h3>
+                        <form id="form-net">
+                            <input type="hidden" id="net-id" value="">
+                            <div class="form-group">
+                                <label for="net-name">Name</label>
+                                <input type="text" id="net-name" required placeholder="e.g. Net Alpha">
+                            </div>
+                            <div class="form-group">
+                                <label for="net-frequency">Frequency (MHz)</label>
+                                <input type="number" id="net-frequency" step="0.001" required placeholder="142.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="net-band">Band</label>
+                                <select id="net-band">
+                                    <option value="VHF">VHF</option>
+                                    <option value="UHF">UHF</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="net-description">Description</label>
+                                <input type="text" id="net-description" placeholder="Optional">
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-net">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <!-- Modal for add/edit node -->
+                <div id="modal-node" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3 id="modal-node-title">Add Node</h3>
+                        <form id="form-node">
+                            <input type="hidden" id="node-id" value="">
+                            <div class="form-group">
+                                <label for="node-label">Label</label>
+                                <input type="text" id="node-label" required placeholder="e.g. Radio-01">
+                            </div>
+                            <div class="form-group">
+                                <label for="node-configured-nets">Configured Nets (comma-separated net IDs or leave empty)</label>
+                                <input type="text" id="node-configured-nets" placeholder="net_xxx, net_yyy">
+                            </div>
+                            <div class="form-group">
+                                <label for="node-assigned-nets">Assigned Nets (comma-separated net IDs)</label>
+                                <input type="text" id="node-assigned-nets" placeholder="net_xxx, net_yyy">
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-node">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
         </main>
     </div>
 

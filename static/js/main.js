@@ -40,6 +40,286 @@ function debugLog(location, message, data = {}, hypothesisId = '') {
     });
 }
 
+// Radio Net Configuration state and functions
+let radioNets = [];
+let radioNodes = [];
+
+async function loadRadioNets() {
+    try {
+        const r = await fetch('/api/radio-nets');
+        const data = await r.json();
+        radioNets = data.nets || [];
+        renderRadioNetList();
+        await loadRadioNetConnectivity();
+    } catch (e) {
+        console.error('Error loading radio nets:', e);
+    }
+}
+
+async function loadRadioNodes() {
+    try {
+        const r = await fetch('/api/radio-nodes');
+        const data = await r.json();
+        radioNodes = data.nodes || [];
+        renderRadioNodeList();
+        await loadRadioNetNonCompliant();
+    } catch (e) {
+        console.error('Error loading radio nodes:', e);
+    }
+}
+
+function renderRadioNetList() {
+    const container = document.getElementById('radio-net-list');
+    if (!container) return;
+    container.innerHTML = '';
+    radioNets.forEach(net => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(net.name)}</strong>
+                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 8px;">
+                    ${net.frequency_mhz} MHz ${net.band}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-net" data-id="${net.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-net" data-id="${net.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-net').addEventListener('click', () => openNetModal(net.id));
+        div.querySelector('.btn-delete-net').addEventListener('click', () => deleteNet(net.id));
+        container.appendChild(div);
+    });
+}
+
+function renderRadioNodeList() {
+    const container = document.getElementById('radio-node-list');
+    if (!container) return;
+    const compliance = window.radioCompliance || { per_node: {} };
+    container.innerHTML = '';
+    radioNodes.forEach(node => {
+        const nc = compliance.per_node[node.id] || {};
+        const div = document.createElement('div');
+        div.className = 'radio-net-item' + (nc.compliant === false ? ' non-compliant' : '');
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(node.label)}</strong>
+                <span style="font-size: 11px; color: var(--text-secondary); display: block;">
+                    configured: ${(node.configured_nets || []).length} | assigned: ${(node.assigned_nets || []).length}
+                    ${nc.missing_nets?.length ? ' ⚠ missing ' + nc.missing_nets.length : ''}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-node" data-id="${node.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-node" data-id="${node.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-node').addEventListener('click', () => openNodeModal(node.id));
+        div.querySelector('.btn-delete-node').addEventListener('click', () => deleteNode(node.id));
+        container.appendChild(div);
+    });
+}
+
+function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+async function loadRadioNetConnectivity() {
+    const container = document.getElementById('radio-net-connectivity');
+    if (!container) return;
+    try {
+        const r = await fetch('/api/radio-nets/connectivity');
+        const data = await r.json();
+        const groups = data.connected_groups || [];
+        const bridges = data.bridge_nodes || [];
+        if (groups.length === 0 && bridges.length === 0) {
+            container.innerHTML = '<p class="radio-net-help">No nets or no shared nodes.</p>';
+            return;
+        }
+        let html = '';
+        if (groups.length > 0) {
+            html += '<p><strong>Connected groups:</strong></p><ul style="margin-bottom: 12px;">';
+            groups.forEach((g, i) => {
+                const names = g.map(nid => {
+                    const n = radioNets.find(x => x.id === nid);
+                    return n ? n.name : nid;
+                });
+                html += `<li>Group ${i + 1}: ${names.join(' ↔ ')}</li>`;
+            });
+            html += '</ul>';
+        }
+        if (bridges.length > 0) {
+            html += '<p><strong>Bridge nodes:</strong></p><ul>';
+            bridges.forEach(b => {
+                const netNames = (b.nets || []).map(nid => {
+                    const n = radioNets.find(x => x.id === nid);
+                    return n ? n.name : nid;
+                });
+                const nodeLabels = (b.bridge_nodes || []).map(nid => {
+                    const nd = radioNodes.find(x => x.id === nid);
+                    return nd ? nd.label : nid;
+                });
+                html += `<li>${netNames.join(' ↔ ')}: ${nodeLabels.join(', ')}</li>`;
+            });
+            html += '</ul>';
+        }
+        container.innerHTML = html || '<p class="radio-net-help">No connectivity data.</p>';
+    } catch (e) {
+        container.innerHTML = '<p class="radio-net-help" style="color: #ff4444;">Error loading connectivity.</p>';
+    }
+}
+
+async function loadRadioNetNonCompliant() {
+    const container = document.getElementById('radio-net-non-compliant');
+    if (!container) return;
+    try {
+        const [r, compR] = await Promise.all([
+            fetch('/api/radio-nets/non-compliant'),
+            fetch('/api/radio-nets/compliance')
+        ]);
+        const data = await r.json();
+        const comp = await compR.json();
+        window.radioCompliance = comp;
+        const list = data.non_compliant || [];
+        if (list.length === 0) {
+            container.innerHTML = '<p class="radio-net-help" style="color: var(--accent-green);">All radios are compliant.</p>';
+            renderRadioNodeList();
+            return;
+        }
+        container.innerHTML = '<ul style="margin: 0; padding-left: 20px;">' +
+            list.map(n => `<li><strong>${escapeHtml(n.label)}</strong>: missing nets ${(n.missing_nets || []).join(', ')}</li>`).join('') +
+            '</ul>';
+        renderRadioNodeList();
+    } catch (e) {
+        container.innerHTML = '<p class="radio-net-help" style="color: #ff4444;">Error loading compliance.</p>';
+    }
+}
+
+function openNetModal(netId = null) {
+    const modal = document.getElementById('modal-net');
+    const title = document.getElementById('modal-net-title');
+    const form = document.getElementById('form-net');
+    form.reset();
+    document.getElementById('net-id').value = netId || '';
+    if (netId) {
+        const net = radioNets.find(n => n.id === netId);
+        if (net) {
+            title.textContent = 'Edit Net';
+            document.getElementById('net-name').value = net.name;
+            document.getElementById('net-frequency').value = net.frequency_mhz;
+            document.getElementById('net-band').value = net.band || 'VHF';
+            document.getElementById('net-description').value = net.description || '';
+        }
+    } else {
+        title.textContent = 'Add Net';
+    }
+    modal.style.display = 'flex';
+}
+
+function openNodeModal(nodeId = null) {
+    const modal = document.getElementById('modal-node');
+    const title = document.getElementById('modal-node-title');
+    const form = document.getElementById('form-node');
+    form.reset();
+    document.getElementById('node-id').value = nodeId || '';
+    if (nodeId) {
+        const node = radioNodes.find(n => n.id === nodeId);
+        if (node) {
+            title.textContent = 'Edit Node';
+            document.getElementById('node-label').value = node.label;
+            document.getElementById('node-configured-nets').value = (node.configured_nets || []).join(', ');
+            document.getElementById('node-assigned-nets').value = (node.assigned_nets || []).join(', ');
+        }
+    } else {
+        title.textContent = 'Add Node';
+    }
+    modal.style.display = 'flex';
+}
+
+async function saveNet(e) {
+    e.preventDefault();
+    const id = document.getElementById('net-id').value;
+    const body = {
+        name: document.getElementById('net-name').value.trim(),
+        frequency_mhz: parseFloat(document.getElementById('net-frequency').value),
+        band: document.getElementById('net-band').value,
+        description: document.getElementById('net-description').value.trim()
+    };
+    try {
+        if (id) {
+            await fetch(`/api/radio-nets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/radio-nets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-net').style.display = 'none';
+        await loadRadioNets();
+    } catch (err) {
+        console.error('Error saving net:', err);
+    }
+}
+
+async function saveNode(e) {
+    e.preventDefault();
+    const id = document.getElementById('node-id').value;
+    const configured = document.getElementById('node-configured-nets').value.split(',').map(s => s.trim()).filter(Boolean);
+    const assigned = document.getElementById('node-assigned-nets').value.split(',').map(s => s.trim()).filter(Boolean);
+    const body = {
+        label: document.getElementById('node-label').value.trim(),
+        configured_nets: configured,
+        assigned_nets: assigned
+    };
+    try {
+        if (id) {
+            await fetch(`/api/radio-nodes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/radio-nodes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-node').style.display = 'none';
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error saving node:', err);
+    }
+}
+
+async function deleteNet(netId) {
+    if (!confirm('Delete this net? It will be removed from all nodes.')) return;
+    try {
+        await fetch(`/api/radio-nets/${netId}`, { method: 'DELETE' });
+        await loadRadioNets();
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error deleting net:', err);
+    }
+}
+
+async function deleteNode(nodeId) {
+    if (!confirm('Delete this node?')) return;
+    try {
+        await fetch(`/api/radio-nodes/${nodeId}`, { method: 'DELETE' });
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error deleting node:', err);
+    }
+}
+
+function setupRadioNetUI() {
+    const btnAddNet = document.getElementById('btn-add-net');
+    const btnAddNode = document.getElementById('btn-add-node');
+    const btnCancelNet = document.getElementById('btn-cancel-net');
+    const btnCancelNode = document.getElementById('btn-cancel-node');
+    const formNet = document.getElementById('form-net');
+    const formNode = document.getElementById('form-node');
+    if (btnAddNet) btnAddNet.addEventListener('click', () => openNetModal());
+    if (btnAddNode) btnAddNode.addEventListener('click', () => openNodeModal());
+    if (btnCancelNet) btnCancelNet.addEventListener('click', () => { document.getElementById('modal-net').style.display = 'none'; });
+    if (btnCancelNode) btnCancelNode.addEventListener('click', () => { document.getElementById('modal-node').style.display = 'none'; });
+    if (formNet) formNet.addEventListener('submit', saveNet);
+    if (formNode) formNode.addEventListener('submit', saveNode);
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('main.js:42', 'DOMContentLoaded', {
@@ -53,9 +333,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupConfiguration();
         setupAirportToggle();
         setupExpandableSections();
+        setupRadioNetUI();
         initializePlotlyCharts();
         initializeGraph();
         initializeLeafletMap();
+        loadRadioNets();
+        loadRadioNodes();
         
         // Verify we have a default carrier selected before refreshing
         if (selectedCarriers.size > 0) {
