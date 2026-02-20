@@ -23,6 +23,11 @@ from radio_nets import (
     create_node, update_node, get_node, list_nodes, delete_node,
     get_net_connectivity, get_compliance_status, get_non_compliant_nodes,
 )
+from satellite_comm import (
+    create_satellite, update_satellite, get_satellite, list_satellites, delete_satellite,
+    add_planned_usage, list_planned_usage, delete_planned_usage,
+    get_nodes_per_satellite, get_satellite_footprints,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -787,6 +792,112 @@ def api_compliance_status():
 def api_non_compliant_nodes():
     """List radios not set up to join their assigned nets."""
     return jsonify({'non_compliant': get_non_compliant_nodes()})
+
+
+# --- Satellite Communications API ---
+
+@app.route('/api/satellites', methods=['GET'])
+def api_list_satellites():
+    """List all satellites."""
+    return jsonify({'satellites': list_satellites()})
+
+
+@app.route('/api/satellites', methods=['POST'])
+def api_create_satellite():
+    """Create a satellite. Body: {name, footprint_center_lat, footprint_center_lon, footprint_radius_km}."""
+    data = request.get_json() or {}
+    name = data.get('name')
+    lat = data.get('footprint_center_lat')
+    lon = data.get('footprint_center_lon')
+    radius = data.get('footprint_radius_km')
+    if not name or lat is None or lon is None or radius is None:
+        return jsonify({'error': 'name, footprint_center_lat, footprint_center_lon, footprint_radius_km required'}), 400
+    try:
+        lat = float(lat)
+        lon = float(lon)
+        radius = float(radius)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'footprint fields must be numeric'}), 400
+    sat = create_satellite(name=str(name), footprint_center_lat=lat, footprint_center_lon=lon, footprint_radius_km=radius)
+    return jsonify(sat), 201
+
+
+@app.route('/api/satellites/<sat_id>', methods=['GET'])
+def api_get_satellite(sat_id):
+    """Get a satellite by ID."""
+    sat = get_satellite(sat_id)
+    if not sat:
+        return jsonify({'error': 'Satellite not found'}), 404
+    return jsonify(sat)
+
+
+@app.route('/api/satellites/<sat_id>', methods=['PUT'])
+def api_update_satellite(sat_id):
+    """Update a satellite."""
+    data = request.get_json() or {}
+    allowed = {k: data[k] for k in ('name', 'footprint_center_lat', 'footprint_center_lon', 'footprint_radius_km') if k in data}
+    sat = update_satellite(sat_id, **allowed)
+    if not sat:
+        return jsonify({'error': 'Satellite not found'}), 404
+    return jsonify(sat)
+
+
+@app.route('/api/satellites/<sat_id>', methods=['DELETE'])
+def api_delete_satellite(sat_id):
+    """Delete a satellite."""
+    if not delete_satellite(sat_id):
+        return jsonify({'error': 'Satellite not found'}), 404
+    return jsonify({'deleted': sat_id})
+
+
+@app.route('/api/satellites/footprints', methods=['GET'])
+def api_satellite_footprints():
+    """Get satellite footprints for map layer."""
+    return jsonify({'footprints': get_satellite_footprints()})
+
+
+@app.route('/api/satellites/planned-usage', methods=['GET'])
+def api_list_planned_usage():
+    """List planned usage. Query params: node_id?, satellite_id?"""
+    node_id = request.args.get('node_id')
+    satellite_id = request.args.get('satellite_id')
+    usage = list_planned_usage(node_id=node_id or None, satellite_id=satellite_id or None)
+    return jsonify({'planned_usage': usage})
+
+
+@app.route('/api/satellites/planned-usage', methods=['POST'])
+def api_add_planned_usage():
+    """Add planned usage. Body: {node_id, satellite_id, start_time, end_time}."""
+    data = request.get_json() or {}
+    node_id = data.get('node_id')
+    satellite_id = data.get('satellite_id')
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+    if not all([node_id, satellite_id, start_time, end_time]):
+        return jsonify({'error': 'node_id, satellite_id, start_time, end_time required'}), 400
+    usage = add_planned_usage(node_id, satellite_id, start_time, end_time)
+    if not usage:
+        return jsonify({'error': 'Satellite not found'}), 404
+    return jsonify(usage), 201
+
+
+@app.route('/api/satellites/planned-usage/<usage_id>', methods=['DELETE'])
+def api_delete_planned_usage(usage_id):
+    """Delete a planned usage."""
+    if not delete_planned_usage(usage_id):
+        return jsonify({'error': 'Planned usage not found'}), 404
+    return jsonify({'deleted': usage_id})
+
+
+@app.route('/api/satellites/nodes-per-satellite', methods=['GET'])
+def api_nodes_per_satellite():
+    """Get node counts per satellite. Query params: time?, saturation_threshold?"""
+    query_time = request.args.get('time')
+    try:
+        threshold = int(request.args.get('saturation_threshold', 10))
+    except (ValueError, TypeError):
+        threshold = 10
+    return jsonify(get_nodes_per_satellite(query_time=query_time, saturation_threshold=threshold))
 
 
 if __name__ == '__main__':

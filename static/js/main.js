@@ -11,6 +11,8 @@ let map = null;
 let aircraftMarkers = [];
 let losLines = [];
 let includeAirports = true;
+let satelliteFootprintLayer = null;
+let satelliteFootprintsEnabled = false;
 let lastGraphData = null; // Store last graph data for status checks // Default: airports enabled
 
 // Debug logging utility
@@ -320,6 +322,280 @@ function setupRadioNetUI() {
     if (formNode) formNode.addEventListener('submit', saveNode);
 }
 
+// Satellite Communications state and functions
+let satellites = [];
+let plannedUsageList = [];
+
+async function loadSatellites() {
+    try {
+        const r = await fetch('/api/satellites');
+        const data = await r.json();
+        satellites = data.satellites || [];
+        renderSatelliteList();
+        updateSatelliteFootprints();
+    } catch (e) {
+        console.error('Error loading satellites:', e);
+    }
+}
+
+async function loadPlannedUsage() {
+    try {
+        const r = await fetch('/api/satellites/planned-usage');
+        const data = await r.json();
+        plannedUsageList = data.planned_usage || [];
+        renderPlannedUsageList();
+    } catch (e) {
+        console.error('Error loading planned usage:', e);
+    }
+}
+
+async function loadNodesPerSatellite() {
+    const threshold = parseInt(document.getElementById('saturation-threshold')?.value || '10', 10);
+    try {
+        const r = await fetch(`/api/satellites/nodes-per-satellite?saturation_threshold=${threshold}`);
+        const data = await r.json();
+        renderNodesPerSatellite(data);
+        renderSaturatedSatellites(data);
+        updateSatelliteFootprints(data);
+    } catch (e) {
+        console.error('Error loading nodes per satellite:', e);
+    }
+}
+
+function renderSatelliteList() {
+    const container = document.getElementById('satellite-list');
+    if (!container) return;
+    container.innerHTML = '';
+    satellites.forEach(sat => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(sat.name)}</strong>
+                <span style="font-size: 11px; color: var(--text-secondary); display: block;">
+                    ${sat.footprint_center_lat?.toFixed(2)}, ${sat.footprint_center_lon?.toFixed(2)} | r=${sat.footprint_radius_km} km
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-satellite" data-id="${sat.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-satellite" data-id="${sat.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-satellite').addEventListener('click', () => openSatelliteModal(sat.id));
+        div.querySelector('.btn-delete-satellite').addEventListener('click', () => deleteSatellite(sat.id));
+        container.appendChild(div);
+    });
+}
+
+function renderPlannedUsageList() {
+    const container = document.getElementById('planned-usage-list');
+    if (!container) return;
+    container.innerHTML = '';
+    const nodeLabels = {};
+    radioNodes.forEach(n => { nodeLabels[n.id] = n.label; });
+    const satNames = {};
+    satellites.forEach(s => { satNames[s.id] = s.name; });
+    plannedUsageList.slice(0, 30).forEach(u => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div style="font-size: 12px;">
+                ${escapeHtml(nodeLabels[u.node_id] || u.node_id)} → ${escapeHtml(satNames[u.satellite_id] || u.satellite_id)}
+                <span style="color: var(--text-secondary); display: block; font-size: 11px;">
+                    ${u.start_time || ''} – ${u.end_time || ''}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-danger btn-delete-usage" data-id="${u.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-delete-usage').addEventListener('click', () => deleteUsage(u.id));
+        container.appendChild(div);
+    });
+    if (plannedUsageList.length > 30) {
+        const more = document.createElement('div');
+        more.className = 'radio-net-help';
+        more.style.marginTop = '8px';
+        more.textContent = `+ ${plannedUsageList.length - 30} more`;
+        container.appendChild(more);
+    }
+}
+
+function renderNodesPerSatellite(data) {
+    const container = document.getElementById('nodes-per-satellite');
+    if (!container) return;
+    const sats = data?.satellites || [];
+    if (sats.length === 0) {
+        container.innerHTML = '<p class="radio-net-help">No satellites or no usage data.</p>';
+        return;
+    }
+    container.innerHTML = '<ul style="margin: 0; padding-left: 20px;">' +
+        sats.map(s => `<li>${escapeHtml(s.name)}: <strong>${s.node_count}</strong> nodes${s.saturated ? ' ⚠ saturated' : ''}</li>`).join('') +
+        '</ul>';
+}
+
+function renderSaturatedSatellites(data) {
+    const container = document.getElementById('saturated-satellites');
+    if (!container) return;
+    const saturated = (data?.satellites || []).filter(s => s.saturated);
+    if (saturated.length === 0) {
+        container.innerHTML = '<p class="radio-net-help" style="color: var(--accent-green);">None.</p>';
+        return;
+    }
+    container.innerHTML = '<ul style="margin: 0; padding-left: 20px; color: #ff4444;">' +
+        saturated.map(s => `<li>${escapeHtml(s.name)}: ${s.node_count} nodes (threshold ${data?.saturation_threshold || 10})</li>`).join('') +
+        '</ul>';
+}
+
+async function updateSatelliteFootprints(nodesPerSatData) {
+    if (!map || !satelliteFootprintLayer) return;
+    if (!satelliteFootprintsEnabled) {
+        map.removeLayer(satelliteFootprintLayer);
+        satelliteFootprintLayer.clearLayers();
+        return;
+    }
+    const footprints = satellites.length ? satellites : (await fetch('/api/satellites/footprints').then(r => r.json()).then(d => d.footprints || []));
+    satelliteFootprintLayer.clearLayers();
+    const satBySaturated = (nodesPerSatData?.satellites || []).reduce((acc, s) => { acc[s.id] = s.saturated; return acc; }, {});
+    footprints.forEach(sat => {
+        const radiusM = (sat.footprint_radius_km || 0) * 1000;
+        const saturated = satBySaturated[sat.id];
+        const circle = L.circle([sat.footprint_center_lat, sat.footprint_center_lon], {
+            radius: radiusM,
+            color: saturated ? '#ff4444' : '#00aaff',
+            fillColor: saturated ? '#ff4444' : '#00aaff',
+            fillOpacity: 0.15,
+            weight: 2
+        });
+        circle.bindPopup(`<strong>${escapeHtml(sat.name)}</strong><br/>Radius: ${sat.footprint_radius_km} km`);
+        circle.addTo(satelliteFootprintLayer);
+    });
+    map.addLayer(satelliteFootprintLayer);
+}
+
+function openSatelliteModal(satId = null) {
+    const modal = document.getElementById('modal-satellite');
+    const title = document.getElementById('modal-satellite-title');
+    const form = document.getElementById('form-satellite');
+    form.reset();
+    document.getElementById('satellite-id').value = satId || '';
+    if (satId) {
+        const sat = satellites.find(s => s.id === satId);
+        if (sat) {
+            title.textContent = 'Edit Satellite';
+            document.getElementById('satellite-name').value = sat.name;
+            document.getElementById('satellite-lat').value = sat.footprint_center_lat;
+            document.getElementById('satellite-lon').value = sat.footprint_center_lon;
+            document.getElementById('satellite-radius').value = sat.footprint_radius_km;
+        }
+    } else {
+        title.textContent = 'Add Satellite';
+    }
+    modal.style.display = 'flex';
+}
+
+function openUsageModal() {
+    const modal = document.getElementById('modal-usage');
+    const sel = document.getElementById('usage-satellite-id');
+    sel.innerHTML = satellites.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('usage-start-time').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    document.getElementById('usage-end-time').value = document.getElementById('usage-start-time').value;
+    modal.style.display = 'flex';
+}
+
+async function saveSatellite(e) {
+    e.preventDefault();
+    const id = document.getElementById('satellite-id').value;
+    const body = {
+        name: document.getElementById('satellite-name').value.trim(),
+        footprint_center_lat: parseFloat(document.getElementById('satellite-lat').value),
+        footprint_center_lon: parseFloat(document.getElementById('satellite-lon').value),
+        footprint_radius_km: parseFloat(document.getElementById('satellite-radius').value)
+    };
+    try {
+        if (id) {
+            await fetch(`/api/satellites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/satellites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-satellite').style.display = 'none';
+        await loadSatellites();
+    } catch (err) {
+        console.error('Error saving satellite:', err);
+    }
+}
+
+async function saveUsage(e) {
+    e.preventDefault();
+    const nodeId = document.getElementById('usage-node-id').value.trim();
+    const satelliteId = document.getElementById('usage-satellite-id').value;
+    const startLocal = document.getElementById('usage-start-time').value;
+    const endLocal = document.getElementById('usage-end-time').value;
+    const startTime = startLocal ? new Date(startLocal).toISOString() : '';
+    const endTime = endLocal ? new Date(endLocal).toISOString() : '';
+    try {
+        await fetch('/api/satellites/planned-usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ node_id: nodeId, satellite_id: satelliteId, start_time: startTime, end_time: endTime })
+        });
+        document.getElementById('modal-usage').style.display = 'none';
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error saving usage:', err);
+    }
+}
+
+async function deleteSatellite(satId) {
+    if (!confirm('Delete this satellite? All planned usage for it will be removed.')) return;
+    try {
+        await fetch(`/api/satellites/${satId}`, { method: 'DELETE' });
+        await loadSatellites();
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error deleting satellite:', err);
+    }
+}
+
+async function deleteUsage(usageId) {
+    try {
+        await fetch(`/api/satellites/planned-usage/${usageId}`, { method: 'DELETE' });
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error deleting usage:', err);
+    }
+}
+
+function setupSatelliteUI() {
+    const btnAddSat = document.getElementById('btn-add-satellite');
+    const btnAddUsage = document.getElementById('btn-add-usage');
+    const btnCancelSat = document.getElementById('btn-cancel-satellite');
+    const btnCancelUsage = document.getElementById('btn-cancel-usage');
+    const btnRefresh = document.getElementById('btn-refresh-sat-stats');
+    const formSat = document.getElementById('form-satellite');
+    const formUsage = document.getElementById('form-usage');
+    const toggle = document.getElementById('satellite-footprints-toggle');
+    if (btnAddSat) btnAddSat.addEventListener('click', () => openSatelliteModal());
+    if (btnAddUsage) btnAddUsage.addEventListener('click', () => openUsageModal());
+    if (btnCancelSat) btnCancelSat.addEventListener('click', () => { document.getElementById('modal-satellite').style.display = 'none'; });
+    if (btnCancelUsage) btnCancelUsage.addEventListener('click', () => { document.getElementById('modal-usage').style.display = 'none'; });
+    if (formSat) formSat.addEventListener('submit', saveSatellite);
+    if (formUsage) formUsage.addEventListener('submit', saveUsage);
+    if (btnRefresh) btnRefresh.addEventListener('click', () => loadNodesPerSatellite());
+    if (toggle) {
+        toggle.addEventListener('change', (e) => {
+            satelliteFootprintsEnabled = e.target.checked;
+            updateSatelliteFootprints();
+            if (satelliteFootprintsEnabled) loadNodesPerSatellite();
+        });
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('main.js:42', 'DOMContentLoaded', {
@@ -334,11 +610,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupAirportToggle();
         setupExpandableSections();
         setupRadioNetUI();
+        setupSatelliteUI();
         initializePlotlyCharts();
         initializeGraph();
         initializeLeafletMap();
         loadRadioNets();
         loadRadioNodes();
+        loadSatellites();
+        loadPlannedUsage();
+        loadNodesPerSatellite();
         
         // Verify we have a default carrier selected before refreshing
         if (selectedCarriers.size > 0) {
@@ -1686,6 +1966,8 @@ function initializeLeafletMap() {
             subdomains: 'abcd',
             maxZoom: 19
         }).addTo(map);
+        
+        satelliteFootprintLayer = L.layerGroup();
         
         debugLog('main.js:1055', 'Leaflet map initialized');
     } catch (e) {
