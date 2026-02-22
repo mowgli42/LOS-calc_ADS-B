@@ -55,6 +55,13 @@
                     <span class="icon">🌍</span>
                     Aircraft Map
                 </h2>
+                <div class="map-layer-controls" style="margin-bottom: 10px;">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="satellite-footprints-toggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Satellite Footprints</span>
+                    </label>
+                </div>
                 <div class="map-container" id="map-container">
                     <div id="map"></div>
                 </div>
@@ -250,6 +257,201 @@
                 </div>
                 <div class="chart-container" style="margin-top: 20px;">
                     <div id="marginal-improvement-chart" style="width: 100%; height: 300px;"></div>
+                </div>
+            </section>
+
+            <section class="radio-net-configuration">
+                <h2>
+                    <span class="icon">📻</span>
+                    Radio Net Configuration
+                </h2>
+                <p class="section-description">
+                    Manage shared nets, nodes (radios), net connectivity, and identify radios not configured to join assigned nets.
+                </p>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Nets</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-net">Add Net</button>
+                        </div>
+                        <div id="radio-net-list" class="radio-net-list"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Nodes (Radios)</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-node">Add Node</button>
+                        </div>
+                        <div id="radio-node-list" class="radio-net-list"></div>
+                    </div>
+                </div>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Net Connectivity</h3>
+                        <p class="radio-net-help">Nets connected via shared nodes (bridge radios)</p>
+                        <div id="radio-net-connectivity" class="radio-net-content"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Non-Compliant Radios</h3>
+                        <p class="radio-net-help">Radios assigned to nets but not configured</p>
+                        <div id="radio-net-non-compliant" class="radio-net-content"></div>
+                    </div>
+                </div>
+                <!-- Modal for add/edit net -->
+                <div id="modal-net" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3 id="modal-net-title">Add Net</h3>
+                        <form id="form-net">
+                            <input type="hidden" id="net-id" value="">
+                            <div class="form-group">
+                                <label for="net-name">Name</label>
+                                <input type="text" id="net-name" required placeholder="e.g. Net Alpha">
+                            </div>
+                            <div class="form-group">
+                                <label for="net-frequency">Frequency (MHz)</label>
+                                <input type="number" id="net-frequency" step="0.001" required placeholder="142.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="net-band">Band</label>
+                                <select id="net-band">
+                                    <option value="VHF">VHF</option>
+                                    <option value="UHF">UHF</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="net-description">Description</label>
+                                <input type="text" id="net-description" placeholder="Optional">
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-net">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <!-- Modal for add/edit node -->
+                <div id="modal-node" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3 id="modal-node-title">Add Node</h3>
+                        <form id="form-node">
+                            <input type="hidden" id="node-id" value="">
+                            <div class="form-group">
+                                <label for="node-label">Label</label>
+                                <input type="text" id="node-label" required placeholder="e.g. Radio-01">
+                            </div>
+                            <div class="form-group">
+                                <label for="node-configured-nets">Configured Nets (comma-separated net IDs or leave empty)</label>
+                                <input type="text" id="node-configured-nets" placeholder="net_xxx, net_yyy">
+                            </div>
+                            <div class="form-group">
+                                <label for="node-assigned-nets">Assigned Nets (comma-separated net IDs)</label>
+                                <input type="text" id="node-assigned-nets" placeholder="net_xxx, net_yyy">
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-node">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <section class="satellite-communications">
+                <h2>
+                    <span class="icon">🛰️</span>
+                    Satellite Communications
+                </h2>
+                <p class="section-description">
+                    Track planned satellite usage per node, total nodes per satellite, and identify saturation when too many users share a footprint.
+                </p>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Satellites</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-satellite">Add Satellite</button>
+                        </div>
+                        <div id="satellite-list" class="radio-net-list"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Planned Usage</h3>
+                        <div class="radio-net-toolbar">
+                            <button type="button" class="btn btn-primary" id="btn-add-usage">Add Planned Usage</button>
+                        </div>
+                        <div id="planned-usage-list" class="radio-net-list"></div>
+                    </div>
+                </div>
+                <div class="radio-net-grid">
+                    <div class="radio-net-panel">
+                        <h3>Nodes Per Satellite</h3>
+                        <p class="radio-net-help">Count at current time; saturation threshold configurable</p>
+                        <div class="radio-net-toolbar">
+                            <label>Threshold:</label>
+                            <input type="number" id="saturation-threshold" value="10" min="1" max="100" style="width: 60px; margin: 0 8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-refresh-sat-stats">Refresh</button>
+                        </div>
+                        <div id="nodes-per-satellite" class="radio-net-content"></div>
+                    </div>
+                    <div class="radio-net-panel">
+                        <h3>Saturated Satellites</h3>
+                        <p class="radio-net-help">Satellites exceeding node threshold</p>
+                        <div id="saturated-satellites" class="radio-net-content"></div>
+                    </div>
+                </div>
+                <!-- Modal for add/edit satellite -->
+                <div id="modal-satellite" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3 id="modal-satellite-title">Add Satellite</h3>
+                        <form id="form-satellite">
+                            <input type="hidden" id="satellite-id" value="">
+                            <div class="form-group">
+                                <label for="satellite-name">Name</label>
+                                <input type="text" id="satellite-name" required placeholder="e.g. SATCOM-1">
+                            </div>
+                            <div class="form-group">
+                                <label for="satellite-lat">Footprint Center Lat</label>
+                                <input type="number" id="satellite-lat" step="0.001" required placeholder="39.8">
+                            </div>
+                            <div class="form-group">
+                                <label for="satellite-lon">Footprint Center Lon</label>
+                                <input type="number" id="satellite-lon" step="0.001" required placeholder="-98.5">
+                            </div>
+                            <div class="form-group">
+                                <label for="satellite-radius">Footprint Radius (km)</label>
+                                <input type="number" id="satellite-radius" step="10" required placeholder="500">
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-satellite">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <!-- Modal for add planned usage -->
+                <div id="modal-usage" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <h3>Add Planned Usage</h3>
+                        <form id="form-usage">
+                            <div class="form-group">
+                                <label for="usage-node-id">Node ID</label>
+                                <input type="text" id="usage-node-id" required placeholder="node_xxx or icao24">
+                            </div>
+                            <div class="form-group">
+                                <label for="usage-satellite-id">Satellite</label>
+                                <select id="usage-satellite-id"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="usage-start-time">Start Time (ISO)</label>
+                                <input type="datetime-local" id="usage-start-time" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="usage-end-time">End Time (ISO)</label>
+                                <input type="datetime-local" id="usage-end-time" required>
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary">Add</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-usage">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </section>
 

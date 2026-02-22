@@ -11,6 +11,8 @@ let map = null;
 let aircraftMarkers = [];
 let losLines = [];
 let includeAirports = true;
+let satelliteFootprintLayer = null;
+let satelliteFootprintsEnabled = false;
 let lastGraphData = null; // Store last graph data for status checks // Default: airports enabled
 
 // Debug logging utility
@@ -40,6 +42,560 @@ function debugLog(location, message, data = {}, hypothesisId = '') {
     });
 }
 
+// Radio Net Configuration state and functions
+let radioNets = [];
+let radioNodes = [];
+
+async function loadRadioNets() {
+    try {
+        const r = await fetch('/api/radio-nets');
+        const data = await r.json();
+        radioNets = data.nets || [];
+        renderRadioNetList();
+        await loadRadioNetConnectivity();
+    } catch (e) {
+        console.error('Error loading radio nets:', e);
+    }
+}
+
+async function loadRadioNodes() {
+    try {
+        const r = await fetch('/api/radio-nodes');
+        const data = await r.json();
+        radioNodes = data.nodes || [];
+        renderRadioNodeList();
+        await loadRadioNetNonCompliant();
+    } catch (e) {
+        console.error('Error loading radio nodes:', e);
+    }
+}
+
+function renderRadioNetList() {
+    const container = document.getElementById('radio-net-list');
+    if (!container) return;
+    container.innerHTML = '';
+    radioNets.forEach(net => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(net.name)}</strong>
+                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 8px;">
+                    ${net.frequency_mhz} MHz ${net.band}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-net" data-id="${net.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-net" data-id="${net.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-net').addEventListener('click', () => openNetModal(net.id));
+        div.querySelector('.btn-delete-net').addEventListener('click', () => deleteNet(net.id));
+        container.appendChild(div);
+    });
+}
+
+function renderRadioNodeList() {
+    const container = document.getElementById('radio-node-list');
+    if (!container) return;
+    const compliance = window.radioCompliance || { per_node: {} };
+    container.innerHTML = '';
+    radioNodes.forEach(node => {
+        const nc = compliance.per_node[node.id] || {};
+        const div = document.createElement('div');
+        div.className = 'radio-net-item' + (nc.compliant === false ? ' non-compliant' : '');
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(node.label)}</strong>
+                <span style="font-size: 11px; color: var(--text-secondary); display: block;">
+                    configured: ${(node.configured_nets || []).length} | assigned: ${(node.assigned_nets || []).length}
+                    ${nc.missing_nets?.length ? ' ⚠ missing ' + nc.missing_nets.length : ''}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-node" data-id="${node.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-node" data-id="${node.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-node').addEventListener('click', () => openNodeModal(node.id));
+        div.querySelector('.btn-delete-node').addEventListener('click', () => deleteNode(node.id));
+        container.appendChild(div);
+    });
+}
+
+function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+async function loadRadioNetConnectivity() {
+    const container = document.getElementById('radio-net-connectivity');
+    if (!container) return;
+    try {
+        const r = await fetch('/api/radio-nets/connectivity');
+        const data = await r.json();
+        const groups = data.connected_groups || [];
+        const bridges = data.bridge_nodes || [];
+        if (groups.length === 0 && bridges.length === 0) {
+            container.innerHTML = '<p class="radio-net-help">No nets or no shared nodes.</p>';
+            return;
+        }
+        let html = '';
+        if (groups.length > 0) {
+            html += '<p><strong>Connected groups:</strong></p><ul style="margin-bottom: 12px;">';
+            groups.forEach((g, i) => {
+                const names = g.map(nid => {
+                    const n = radioNets.find(x => x.id === nid);
+                    return n ? n.name : nid;
+                });
+                html += `<li>Group ${i + 1}: ${names.join(' ↔ ')}</li>`;
+            });
+            html += '</ul>';
+        }
+        if (bridges.length > 0) {
+            html += '<p><strong>Bridge nodes:</strong></p><ul>';
+            bridges.forEach(b => {
+                const netNames = (b.nets || []).map(nid => {
+                    const n = radioNets.find(x => x.id === nid);
+                    return n ? n.name : nid;
+                });
+                const nodeLabels = (b.bridge_nodes || []).map(nid => {
+                    const nd = radioNodes.find(x => x.id === nid);
+                    return nd ? nd.label : nid;
+                });
+                html += `<li>${netNames.join(' ↔ ')}: ${nodeLabels.join(', ')}</li>`;
+            });
+            html += '</ul>';
+        }
+        container.innerHTML = html || '<p class="radio-net-help">No connectivity data.</p>';
+    } catch (e) {
+        container.innerHTML = '<p class="radio-net-help" style="color: #ff4444;">Error loading connectivity.</p>';
+    }
+}
+
+async function loadRadioNetNonCompliant() {
+    const container = document.getElementById('radio-net-non-compliant');
+    if (!container) return;
+    try {
+        const [r, compR] = await Promise.all([
+            fetch('/api/radio-nets/non-compliant'),
+            fetch('/api/radio-nets/compliance')
+        ]);
+        const data = await r.json();
+        const comp = await compR.json();
+        window.radioCompliance = comp;
+        const list = data.non_compliant || [];
+        if (list.length === 0) {
+            container.innerHTML = '<p class="radio-net-help" style="color: var(--accent-green);">All radios are compliant.</p>';
+            renderRadioNodeList();
+            return;
+        }
+        container.innerHTML = '<ul style="margin: 0; padding-left: 20px;">' +
+            list.map(n => `<li><strong>${escapeHtml(n.label)}</strong>: missing nets ${(n.missing_nets || []).join(', ')}</li>`).join('') +
+            '</ul>';
+        renderRadioNodeList();
+    } catch (e) {
+        container.innerHTML = '<p class="radio-net-help" style="color: #ff4444;">Error loading compliance.</p>';
+    }
+}
+
+function openNetModal(netId = null) {
+    const modal = document.getElementById('modal-net');
+    const title = document.getElementById('modal-net-title');
+    const form = document.getElementById('form-net');
+    form.reset();
+    document.getElementById('net-id').value = netId || '';
+    if (netId) {
+        const net = radioNets.find(n => n.id === netId);
+        if (net) {
+            title.textContent = 'Edit Net';
+            document.getElementById('net-name').value = net.name;
+            document.getElementById('net-frequency').value = net.frequency_mhz;
+            document.getElementById('net-band').value = net.band || 'VHF';
+            document.getElementById('net-description').value = net.description || '';
+        }
+    } else {
+        title.textContent = 'Add Net';
+    }
+    modal.style.display = 'flex';
+}
+
+function openNodeModal(nodeId = null) {
+    const modal = document.getElementById('modal-node');
+    const title = document.getElementById('modal-node-title');
+    const form = document.getElementById('form-node');
+    form.reset();
+    document.getElementById('node-id').value = nodeId || '';
+    if (nodeId) {
+        const node = radioNodes.find(n => n.id === nodeId);
+        if (node) {
+            title.textContent = 'Edit Node';
+            document.getElementById('node-label').value = node.label;
+            document.getElementById('node-configured-nets').value = (node.configured_nets || []).join(', ');
+            document.getElementById('node-assigned-nets').value = (node.assigned_nets || []).join(', ');
+        }
+    } else {
+        title.textContent = 'Add Node';
+    }
+    modal.style.display = 'flex';
+}
+
+async function saveNet(e) {
+    e.preventDefault();
+    const id = document.getElementById('net-id').value;
+    const body = {
+        name: document.getElementById('net-name').value.trim(),
+        frequency_mhz: parseFloat(document.getElementById('net-frequency').value),
+        band: document.getElementById('net-band').value,
+        description: document.getElementById('net-description').value.trim()
+    };
+    try {
+        if (id) {
+            await fetch(`/api/radio-nets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/radio-nets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-net').style.display = 'none';
+        await loadRadioNets();
+    } catch (err) {
+        console.error('Error saving net:', err);
+    }
+}
+
+async function saveNode(e) {
+    e.preventDefault();
+    const id = document.getElementById('node-id').value;
+    const configured = document.getElementById('node-configured-nets').value.split(',').map(s => s.trim()).filter(Boolean);
+    const assigned = document.getElementById('node-assigned-nets').value.split(',').map(s => s.trim()).filter(Boolean);
+    const body = {
+        label: document.getElementById('node-label').value.trim(),
+        configured_nets: configured,
+        assigned_nets: assigned
+    };
+    try {
+        if (id) {
+            await fetch(`/api/radio-nodes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/radio-nodes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-node').style.display = 'none';
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error saving node:', err);
+    }
+}
+
+async function deleteNet(netId) {
+    if (!confirm('Delete this net? It will be removed from all nodes.')) return;
+    try {
+        await fetch(`/api/radio-nets/${netId}`, { method: 'DELETE' });
+        await loadRadioNets();
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error deleting net:', err);
+    }
+}
+
+async function deleteNode(nodeId) {
+    if (!confirm('Delete this node?')) return;
+    try {
+        await fetch(`/api/radio-nodes/${nodeId}`, { method: 'DELETE' });
+        await loadRadioNodes();
+    } catch (err) {
+        console.error('Error deleting node:', err);
+    }
+}
+
+function setupRadioNetUI() {
+    const btnAddNet = document.getElementById('btn-add-net');
+    const btnAddNode = document.getElementById('btn-add-node');
+    const btnCancelNet = document.getElementById('btn-cancel-net');
+    const btnCancelNode = document.getElementById('btn-cancel-node');
+    const formNet = document.getElementById('form-net');
+    const formNode = document.getElementById('form-node');
+    if (btnAddNet) btnAddNet.addEventListener('click', () => openNetModal());
+    if (btnAddNode) btnAddNode.addEventListener('click', () => openNodeModal());
+    if (btnCancelNet) btnCancelNet.addEventListener('click', () => { document.getElementById('modal-net').style.display = 'none'; });
+    if (btnCancelNode) btnCancelNode.addEventListener('click', () => { document.getElementById('modal-node').style.display = 'none'; });
+    if (formNet) formNet.addEventListener('submit', saveNet);
+    if (formNode) formNode.addEventListener('submit', saveNode);
+}
+
+// Satellite Communications state and functions
+let satellites = [];
+let plannedUsageList = [];
+
+async function loadSatellites() {
+    try {
+        const r = await fetch('/api/satellites');
+        const data = await r.json();
+        satellites = data.satellites || [];
+        renderSatelliteList();
+        updateSatelliteFootprints();
+    } catch (e) {
+        console.error('Error loading satellites:', e);
+    }
+}
+
+async function loadPlannedUsage() {
+    try {
+        const r = await fetch('/api/satellites/planned-usage');
+        const data = await r.json();
+        plannedUsageList = data.planned_usage || [];
+        renderPlannedUsageList();
+    } catch (e) {
+        console.error('Error loading planned usage:', e);
+    }
+}
+
+async function loadNodesPerSatellite() {
+    const threshold = parseInt(document.getElementById('saturation-threshold')?.value || '10', 10);
+    try {
+        const r = await fetch(`/api/satellites/nodes-per-satellite?saturation_threshold=${threshold}`);
+        const data = await r.json();
+        renderNodesPerSatellite(data);
+        renderSaturatedSatellites(data);
+        updateSatelliteFootprints(data);
+    } catch (e) {
+        console.error('Error loading nodes per satellite:', e);
+    }
+}
+
+function renderSatelliteList() {
+    const container = document.getElementById('satellite-list');
+    if (!container) return;
+    container.innerHTML = '';
+    satellites.forEach(sat => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div>
+                <strong>${escapeHtml(sat.name)}</strong>
+                <span style="font-size: 11px; color: var(--text-secondary); display: block;">
+                    ${sat.footprint_center_lat?.toFixed(2)}, ${sat.footprint_center_lon?.toFixed(2)} | r=${sat.footprint_radius_km} km
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-secondary btn-edit-satellite" data-id="${sat.id}">Edit</button>
+                <button type="button" class="btn btn-danger btn-delete-satellite" data-id="${sat.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-edit-satellite').addEventListener('click', () => openSatelliteModal(sat.id));
+        div.querySelector('.btn-delete-satellite').addEventListener('click', () => deleteSatellite(sat.id));
+        container.appendChild(div);
+    });
+}
+
+function renderPlannedUsageList() {
+    const container = document.getElementById('planned-usage-list');
+    if (!container) return;
+    container.innerHTML = '';
+    const nodeLabels = {};
+    radioNodes.forEach(n => { nodeLabels[n.id] = n.label; });
+    const satNames = {};
+    satellites.forEach(s => { satNames[s.id] = s.name; });
+    plannedUsageList.slice(0, 30).forEach(u => {
+        const div = document.createElement('div');
+        div.className = 'radio-net-item';
+        div.innerHTML = `
+            <div style="font-size: 12px;">
+                ${escapeHtml(nodeLabels[u.node_id] || u.node_id)} → ${escapeHtml(satNames[u.satellite_id] || u.satellite_id)}
+                <span style="color: var(--text-secondary); display: block; font-size: 11px;">
+                    ${u.start_time || ''} – ${u.end_time || ''}
+                </span>
+            </div>
+            <div class="item-actions">
+                <button type="button" class="btn btn-danger btn-delete-usage" data-id="${u.id}">Delete</button>
+            </div>
+        `;
+        div.querySelector('.btn-delete-usage').addEventListener('click', () => deleteUsage(u.id));
+        container.appendChild(div);
+    });
+    if (plannedUsageList.length > 30) {
+        const more = document.createElement('div');
+        more.className = 'radio-net-help';
+        more.style.marginTop = '8px';
+        more.textContent = `+ ${plannedUsageList.length - 30} more`;
+        container.appendChild(more);
+    }
+}
+
+function renderNodesPerSatellite(data) {
+    const container = document.getElementById('nodes-per-satellite');
+    if (!container) return;
+    const sats = data?.satellites || [];
+    if (sats.length === 0) {
+        container.innerHTML = '<p class="radio-net-help">No satellites or no usage data.</p>';
+        return;
+    }
+    container.innerHTML = '<ul style="margin: 0; padding-left: 20px;">' +
+        sats.map(s => `<li>${escapeHtml(s.name)}: <strong>${s.node_count}</strong> nodes${s.saturated ? ' ⚠ saturated' : ''}</li>`).join('') +
+        '</ul>';
+}
+
+function renderSaturatedSatellites(data) {
+    const container = document.getElementById('saturated-satellites');
+    if (!container) return;
+    const saturated = (data?.satellites || []).filter(s => s.saturated);
+    if (saturated.length === 0) {
+        container.innerHTML = '<p class="radio-net-help" style="color: var(--accent-green);">None.</p>';
+        return;
+    }
+    container.innerHTML = '<ul style="margin: 0; padding-left: 20px; color: #ff4444;">' +
+        saturated.map(s => `<li>${escapeHtml(s.name)}: ${s.node_count} nodes (threshold ${data?.saturation_threshold || 10})</li>`).join('') +
+        '</ul>';
+}
+
+async function updateSatelliteFootprints(nodesPerSatData) {
+    if (!map || !satelliteFootprintLayer) return;
+    if (!satelliteFootprintsEnabled) {
+        map.removeLayer(satelliteFootprintLayer);
+        satelliteFootprintLayer.clearLayers();
+        return;
+    }
+    const footprints = satellites.length ? satellites : (await fetch('/api/satellites/footprints').then(r => r.json()).then(d => d.footprints || []));
+    satelliteFootprintLayer.clearLayers();
+    const satBySaturated = (nodesPerSatData?.satellites || []).reduce((acc, s) => { acc[s.id] = s.saturated; return acc; }, {});
+    footprints.forEach(sat => {
+        const radiusM = (sat.footprint_radius_km || 0) * 1000;
+        const saturated = satBySaturated[sat.id];
+        const circle = L.circle([sat.footprint_center_lat, sat.footprint_center_lon], {
+            radius: radiusM,
+            color: saturated ? '#ff4444' : '#00aaff',
+            fillColor: saturated ? '#ff4444' : '#00aaff',
+            fillOpacity: 0.15,
+            weight: 2
+        });
+        circle.bindPopup(`<strong>${escapeHtml(sat.name)}</strong><br/>Radius: ${sat.footprint_radius_km} km`);
+        circle.addTo(satelliteFootprintLayer);
+    });
+    map.addLayer(satelliteFootprintLayer);
+}
+
+function openSatelliteModal(satId = null) {
+    const modal = document.getElementById('modal-satellite');
+    const title = document.getElementById('modal-satellite-title');
+    const form = document.getElementById('form-satellite');
+    form.reset();
+    document.getElementById('satellite-id').value = satId || '';
+    if (satId) {
+        const sat = satellites.find(s => s.id === satId);
+        if (sat) {
+            title.textContent = 'Edit Satellite';
+            document.getElementById('satellite-name').value = sat.name;
+            document.getElementById('satellite-lat').value = sat.footprint_center_lat;
+            document.getElementById('satellite-lon').value = sat.footprint_center_lon;
+            document.getElementById('satellite-radius').value = sat.footprint_radius_km;
+        }
+    } else {
+        title.textContent = 'Add Satellite';
+    }
+    modal.style.display = 'flex';
+}
+
+function openUsageModal() {
+    const modal = document.getElementById('modal-usage');
+    const sel = document.getElementById('usage-satellite-id');
+    sel.innerHTML = satellites.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('usage-start-time').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    document.getElementById('usage-end-time').value = document.getElementById('usage-start-time').value;
+    modal.style.display = 'flex';
+}
+
+async function saveSatellite(e) {
+    e.preventDefault();
+    const id = document.getElementById('satellite-id').value;
+    const body = {
+        name: document.getElementById('satellite-name').value.trim(),
+        footprint_center_lat: parseFloat(document.getElementById('satellite-lat').value),
+        footprint_center_lon: parseFloat(document.getElementById('satellite-lon').value),
+        footprint_radius_km: parseFloat(document.getElementById('satellite-radius').value)
+    };
+    try {
+        if (id) {
+            await fetch(`/api/satellites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+            await fetch('/api/satellites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        document.getElementById('modal-satellite').style.display = 'none';
+        await loadSatellites();
+    } catch (err) {
+        console.error('Error saving satellite:', err);
+    }
+}
+
+async function saveUsage(e) {
+    e.preventDefault();
+    const nodeId = document.getElementById('usage-node-id').value.trim();
+    const satelliteId = document.getElementById('usage-satellite-id').value;
+    const startLocal = document.getElementById('usage-start-time').value;
+    const endLocal = document.getElementById('usage-end-time').value;
+    const startTime = startLocal ? new Date(startLocal).toISOString() : '';
+    const endTime = endLocal ? new Date(endLocal).toISOString() : '';
+    try {
+        await fetch('/api/satellites/planned-usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ node_id: nodeId, satellite_id: satelliteId, start_time: startTime, end_time: endTime })
+        });
+        document.getElementById('modal-usage').style.display = 'none';
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error saving usage:', err);
+    }
+}
+
+async function deleteSatellite(satId) {
+    if (!confirm('Delete this satellite? All planned usage for it will be removed.')) return;
+    try {
+        await fetch(`/api/satellites/${satId}`, { method: 'DELETE' });
+        await loadSatellites();
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error deleting satellite:', err);
+    }
+}
+
+async function deleteUsage(usageId) {
+    try {
+        await fetch(`/api/satellites/planned-usage/${usageId}`, { method: 'DELETE' });
+        await loadPlannedUsage();
+        await loadNodesPerSatellite();
+    } catch (err) {
+        console.error('Error deleting usage:', err);
+    }
+}
+
+function setupSatelliteUI() {
+    const btnAddSat = document.getElementById('btn-add-satellite');
+    const btnAddUsage = document.getElementById('btn-add-usage');
+    const btnCancelSat = document.getElementById('btn-cancel-satellite');
+    const btnCancelUsage = document.getElementById('btn-cancel-usage');
+    const btnRefresh = document.getElementById('btn-refresh-sat-stats');
+    const formSat = document.getElementById('form-satellite');
+    const formUsage = document.getElementById('form-usage');
+    const toggle = document.getElementById('satellite-footprints-toggle');
+    if (btnAddSat) btnAddSat.addEventListener('click', () => openSatelliteModal());
+    if (btnAddUsage) btnAddUsage.addEventListener('click', () => openUsageModal());
+    if (btnCancelSat) btnCancelSat.addEventListener('click', () => { document.getElementById('modal-satellite').style.display = 'none'; });
+    if (btnCancelUsage) btnCancelUsage.addEventListener('click', () => { document.getElementById('modal-usage').style.display = 'none'; });
+    if (formSat) formSat.addEventListener('submit', saveSatellite);
+    if (formUsage) formUsage.addEventListener('submit', saveUsage);
+    if (btnRefresh) btnRefresh.addEventListener('click', () => loadNodesPerSatellite());
+    if (toggle) {
+        toggle.addEventListener('change', (e) => {
+            satelliteFootprintsEnabled = e.target.checked;
+            updateSatelliteFootprints();
+            if (satelliteFootprintsEnabled) loadNodesPerSatellite();
+        });
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     debugLog('main.js:42', 'DOMContentLoaded', {
@@ -53,9 +609,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupConfiguration();
         setupAirportToggle();
         setupExpandableSections();
+        setupRadioNetUI();
+        setupSatelliteUI();
         initializePlotlyCharts();
         initializeGraph();
         initializeLeafletMap();
+        loadRadioNets();
+        loadRadioNodes();
+        loadSatellites();
+        loadPlannedUsage();
+        loadNodesPerSatellite();
         
         // Verify we have a default carrier selected before refreshing
         if (selectedCarriers.size > 0) {
@@ -1403,6 +1966,8 @@ function initializeLeafletMap() {
             subdomains: 'abcd',
             maxZoom: 19
         }).addTo(map);
+        
+        satelliteFootprintLayer = L.layerGroup();
         
         debugLog('main.js:1055', 'Leaflet map initialized');
     } catch (e) {
