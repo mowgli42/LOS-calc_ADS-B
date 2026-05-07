@@ -900,6 +900,100 @@ def api_nodes_per_satellite():
     return jsonify(get_nodes_per_satellite(query_time=query_time, saturation_threshold=threshold))
 
 
+@app.route('/api/los-table', methods=['POST'])
+def get_los_table():
+    """
+    Get full LOS pair data for a sortable/filterable data table.
+
+    Expected JSON body:
+    {
+        "carriers": ["DAL", "UAL"],
+        "carrier_ranges": {"DAL": 200, "UAL": 200},
+        "include_airports": true
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        selected_carriers = data.get('carriers', [])
+        include_airports = data.get('include_airports', False)
+
+        if not selected_carriers:
+            return jsonify({'error': 'No carriers selected'}), 400
+
+        carrier_ranges = data.get('carrier_ranges', {})
+        for carrier in selected_carriers:
+            if carrier not in carrier_ranges:
+                carrier_ranges[carrier] = CARRIERS.get(carrier, {}).get(
+                    'default_range_km', DEFAULT_COMMUNICATION_RANGE_KM
+                )
+
+        all_aircraft = get_cached_aircraft()
+        aircraft_list = [a for a in all_aircraft if a.get('carrier_code') in selected_carriers]
+
+        seen = set()
+        unique_aircraft = []
+        for a in aircraft_list:
+            icao = a.get('icao24')
+            if icao and icao not in seen:
+                seen.add(icao)
+                unique_aircraft.append(a)
+        aircraft_list = unique_aircraft
+
+        aircraft_by_icao = {a['icao24']: a for a in aircraft_list}
+
+        pairs = []
+
+        if len(aircraft_list) >= 2:
+            distances = calculate_all_pair_distances(aircraft_list)
+            for d in distances:
+                ac1 = aircraft_by_icao.get(d['aircraft1']['icao24'], {})
+                ac2 = aircraft_by_icao.get(d['aircraft2']['icao24'], {})
+                pairs.append({
+                    'aircraft1_icao24': d['aircraft1']['icao24'],
+                    'aircraft1_callsign': d['aircraft1'].get('callsign') or d['aircraft1']['icao24'],
+                    'aircraft1_carrier': d['aircraft1'].get('carrier') or '',
+                    'aircraft1_altitude': ac1.get('geo_altitude') or 0,
+                    'aircraft2_icao24': d['aircraft2']['icao24'],
+                    'aircraft2_callsign': d['aircraft2'].get('callsign') or d['aircraft2']['icao24'],
+                    'aircraft2_carrier': d['aircraft2'].get('carrier') or '',
+                    'aircraft2_altitude': ac2.get('geo_altitude') or 0,
+                    'distance_km': round(d['distance_km'], 2),
+                    'radio_horizon_km': round(d['radio_horizon_km'], 2),
+                    'los_distance_km': round(d['los_distance_km'], 2) if d['los_distance_km'] is not None else None,
+                    'within_los': d['within_los'],
+                })
+
+        if include_airports and len(aircraft_list) > 0:
+            airport_distances = calculate_airport_to_aircraft_distances(TOP_50_AIRPORTS, aircraft_list)
+            for d in airport_distances:
+                ac = aircraft_by_icao.get(d['aircraft']['icao24'], {})
+                pairs.append({
+                    'aircraft1_icao24': d['airport']['icao24'],
+                    'aircraft1_callsign': d['airport'].get('name') or d['airport']['icao24'],
+                    'aircraft1_carrier': 'AIRPORT',
+                    'aircraft1_altitude': d['airport'].get('elevation_m') or 0,
+                    'aircraft2_icao24': d['aircraft']['icao24'],
+                    'aircraft2_callsign': d['aircraft'].get('callsign') or d['aircraft']['icao24'],
+                    'aircraft2_carrier': d['aircraft'].get('carrier') or '',
+                    'aircraft2_altitude': ac.get('geo_altitude') or 0,
+                    'distance_km': round(d['distance_km'], 2),
+                    'radio_horizon_km': round(d['radio_horizon_km'], 2),
+                    'los_distance_km': round(d['los_distance_km'], 2) if d['los_distance_km'] is not None else None,
+                    'within_los': d['within_los'],
+                })
+
+        return jsonify({
+            'pairs': pairs,
+            'total_count': len(pairs),
+            'aircraft_count': len(aircraft_list),
+            'last_update': data_cache['last_update'].isoformat() if data_cache['last_update'] else None,
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting LOS table data: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='ADS-B Line of Sight Calculator')
     parser.add_argument(

@@ -611,6 +611,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         setupExpandableSections();
         setupRadioNetUI();
         setupSatelliteUI();
+        setupLosTableUI();
         initializePlotlyCharts();
         initializeGraph();
         initializeLeafletMap();
@@ -1125,6 +1126,9 @@ async function refreshData() {
         updateConnectivityCurve(null);
         updateRangeSensitivity(null);
         updateLOSStatus('Waiting for carrier selection', 'waiting');
+        losTableData = [];
+        losTableFiltered = [];
+        renderLosTable();
         return;
     }
     
@@ -1250,7 +1254,10 @@ async function refreshData() {
             
             // Update range sensitivity chart
             updateRangeSensitivity(rangeSensitivityData);
-            
+
+            // Update LOS data table
+            await fetchLosTableData();
+
             // Update LOS status
             const losPairs = metricsData.coverage?.los_pairs_count || 0;
             const totalPairs = metricsData.coverage?.total_pairs || 0;
@@ -2188,5 +2195,201 @@ function updateLOSMetrics(metrics) {
     } else {
         document.getElementById('metric-bounding-box-container').style.display = 'none';
     }
+}
+
+// --- LOS Data Table ---
+
+let losTableData = [];
+let losTableFiltered = [];
+let losTableSortCol = 'distance_km';
+let losTableSortAsc = true;
+
+async function fetchLosTableData() {
+    if (selectedCarriers.size === 0) {
+        losTableData = [];
+        losTableFiltered = [];
+        renderLosTable();
+        return;
+    }
+
+    const carriersArray = Array.from(selectedCarriers);
+    const rangesObj = {};
+    carriersArray.forEach(code => {
+        rangesObj[code] = carrierRanges[code] || carriers[code].default_range_km;
+    });
+
+    try {
+        const resp = await fetch('/api/los-table', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                carriers: carriersArray,
+                carrier_ranges: rangesObj,
+                include_airports: includeAirports,
+            }),
+        });
+        if (!resp.ok) {
+            losTableData = [];
+            losTableFiltered = [];
+            renderLosTable();
+            return;
+        }
+        const data = await resp.json();
+        losTableData = data.pairs || [];
+        applyLosTableFilters();
+    } catch (e) {
+        console.error('Error fetching LOS table data:', e);
+        losTableData = [];
+        losTableFiltered = [];
+        renderLosTable();
+    }
+}
+
+function applyLosTableFilters() {
+    const carrierFilter = (document.getElementById('los-filter-carrier')?.value || '').trim().toUpperCase();
+    const statusFilter = document.getElementById('los-filter-status')?.value || 'all';
+    const minDist = parseFloat(document.getElementById('los-filter-min-dist')?.value);
+    const maxDist = parseFloat(document.getElementById('los-filter-max-dist')?.value);
+
+    losTableFiltered = losTableData.filter(row => {
+        if (carrierFilter && !(
+            (row.aircraft1_carrier || '').toUpperCase().includes(carrierFilter) ||
+            (row.aircraft2_carrier || '').toUpperCase().includes(carrierFilter)
+        )) return false;
+
+        if (statusFilter === 'los' && !row.within_los) return false;
+        if (statusFilter === 'no-los' && row.within_los) return false;
+
+        if (!isNaN(minDist) && row.distance_km < minDist) return false;
+        if (!isNaN(maxDist) && row.distance_km > maxDist) return false;
+
+        return true;
+    });
+
+    sortLosTableData();
+    renderLosTable();
+}
+
+function sortLosTableData() {
+    const col = losTableSortCol;
+    const asc = losTableSortAsc;
+    const numericCols = ['distance_km', 'radio_horizon_km', 'los_distance_km', 'aircraft1_altitude', 'aircraft2_altitude'];
+    const isNumeric = numericCols.includes(col);
+
+    losTableFiltered.sort((a, b) => {
+        let va = a[col];
+        let vb = b[col];
+
+        if (col === 'within_los') {
+            va = va ? 1 : 0;
+            vb = vb ? 1 : 0;
+        } else if (isNumeric) {
+            va = va != null ? va : -Infinity;
+            vb = vb != null ? vb : -Infinity;
+        } else {
+            va = (va || '').toString().toLowerCase();
+            vb = (vb || '').toString().toLowerCase();
+        }
+
+        if (va < vb) return asc ? -1 : 1;
+        if (va > vb) return asc ? 1 : -1;
+        return 0;
+    });
+}
+
+function renderLosTable() {
+    const tbody = document.getElementById('los-data-table-body');
+    const countEl = document.getElementById('los-table-row-count');
+    if (!tbody) return;
+
+    if (losTableData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="los-table-empty">Select carriers to view LOS pair data</td></tr>';
+        if (countEl) countEl.textContent = '0 / 0 pairs';
+        updateSortArrows();
+        return;
+    }
+
+    if (losTableFiltered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="los-table-empty">No pairs match the current filters</td></tr>';
+        if (countEl) countEl.textContent = `0 / ${losTableData.length} pairs`;
+        updateSortArrows();
+        return;
+    }
+
+    const pageSizeSel = document.getElementById('los-table-page-size');
+    const pageSizeVal = pageSizeSel ? pageSizeSel.value : '100';
+    const pageSize = pageSizeVal === 'all' ? losTableFiltered.length : parseInt(pageSizeVal, 10);
+    const visibleRows = losTableFiltered.slice(0, pageSize);
+
+    let html = '';
+    visibleRows.forEach(row => {
+        const losClass = row.within_los ? 'los-yes' : 'los-no';
+        const losText = row.within_los ? 'Yes' : 'No';
+        const losDist = row.los_distance_km != null ? row.los_distance_km.toFixed(2) : '—';
+        html += `<tr>
+            <td title="${escapeHtml(row.aircraft1_icao24)}">${escapeHtml(row.aircraft1_callsign)}</td>
+            <td title="${escapeHtml(row.aircraft2_icao24)}">${escapeHtml(row.aircraft2_callsign)}</td>
+            <td>${escapeHtml(row.aircraft1_carrier)}</td>
+            <td>${escapeHtml(row.aircraft2_carrier)}</td>
+            <td>${row.distance_km.toFixed(2)}</td>
+            <td>${row.radio_horizon_km.toFixed(2)}</td>
+            <td>${losDist}</td>
+            <td class="${losClass}">${losText}</td>
+            <td>${Math.round(row.aircraft1_altitude)}</td>
+            <td>${Math.round(row.aircraft2_altitude)}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+
+    const shown = visibleRows.length;
+    const filtered = losTableFiltered.length;
+    const total = losTableData.length;
+    if (countEl) {
+        countEl.textContent = filtered === total
+            ? `${shown} / ${total} pairs`
+            : `${shown} / ${filtered} filtered (${total} total)`;
+    }
+
+    updateSortArrows();
+}
+
+function updateSortArrows() {
+    const ths = document.querySelectorAll('#los-data-table thead th.sortable');
+    ths.forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        if (th.dataset.col === losTableSortCol) {
+            arrow.textContent = losTableSortAsc ? ' ▲' : ' ▼';
+            th.classList.add('sort-active');
+        } else {
+            arrow.textContent = '';
+            th.classList.remove('sort-active');
+        }
+    });
+}
+
+function setupLosTableUI() {
+    const ths = document.querySelectorAll('#los-data-table thead th.sortable');
+    ths.forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.dataset.col;
+            if (losTableSortCol === col) {
+                losTableSortAsc = !losTableSortAsc;
+            } else {
+                losTableSortCol = col;
+                losTableSortAsc = true;
+            }
+            sortLosTableData();
+            renderLosTable();
+        });
+    });
+
+    ['los-filter-carrier', 'los-filter-status', 'los-filter-min-dist', 'los-filter-max-dist', 'los-table-page-size'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', () => applyLosTableFilters());
+        if (el && el.tagName === 'INPUT' && el.type === 'text') {
+            el.addEventListener('input', () => applyLosTableFilters());
+        }
+    });
 }
 

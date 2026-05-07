@@ -247,6 +247,68 @@
                 </div>
             </section>
 
+            <section class="los-data-table-section">
+                <h2>
+                    <span class="icon">📋</span>
+                    LOS Data Table
+                </h2>
+                <div id="los-table-filters" class="los-table-filters">
+                    <div class="filter-group">
+                        <label for="los-filter-carrier">Carrier:</label>
+                        <input type="text" id="los-filter-carrier" placeholder="e.g. DAL" class="filter-input">
+                    </div>
+                    <div class="filter-group">
+                        <label for="los-filter-status">LOS Status:</label>
+                        <select id="los-filter-status" class="filter-select">
+                            <option value="all">All</option>
+                            <option value="los">Within LOS</option>
+                            <option value="no-los">Outside LOS</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="los-filter-min-dist">Min Dist (km):</label>
+                        <input type="number" id="los-filter-min-dist" placeholder="0" class="filter-input filter-input-num" min="0" step="10">
+                    </div>
+                    <div class="filter-group">
+                        <label for="los-filter-max-dist">Max Dist (km):</label>
+                        <input type="number" id="los-filter-max-dist" placeholder="∞" class="filter-input filter-input-num" min="0" step="10">
+                    </div>
+                    <div class="filter-group">
+                        <label for="los-table-page-size">Rows:</label>
+                        <select id="los-table-page-size" class="filter-select">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="250">250</option>
+                            <option value="all">All</option>
+                        </select>
+                    </div>
+                    <div class="filter-group los-table-count">
+                        <span id="los-table-row-count">0 / 0 pairs</span>
+                    </div>
+                </div>
+                <div class="los-table-wrapper">
+                    <table class="los-data-table" id="los-data-table">
+                        <thead>
+                            <tr>
+                                <th data-col="aircraft1_callsign" class="sortable">Aircraft 1 <span class="sort-arrow"></span></th>
+                                <th data-col="aircraft2_callsign" class="sortable">Aircraft 2 <span class="sort-arrow"></span></th>
+                                <th data-col="aircraft1_carrier" class="sortable">Carrier 1 <span class="sort-arrow"></span></th>
+                                <th data-col="aircraft2_carrier" class="sortable">Carrier 2 <span class="sort-arrow"></span></th>
+                                <th data-col="distance_km" class="sortable">Distance (km) <span class="sort-arrow"></span></th>
+                                <th data-col="radio_horizon_km" class="sortable">Radio Horizon (km) <span class="sort-arrow"></span></th>
+                                <th data-col="los_distance_km" class="sortable">LOS Dist (km) <span class="sort-arrow"></span></th>
+                                <th data-col="within_los" class="sortable">LOS Status <span class="sort-arrow"></span></th>
+                                <th data-col="aircraft1_altitude" class="sortable">Alt 1 (m) <span class="sort-arrow"></span></th>
+                                <th data-col="aircraft2_altitude" class="sortable">Alt 2 (m) <span class="sort-arrow"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="los-data-table-body">
+                            <tr><td colspan="10" class="los-table-empty">Select carriers to view LOS pair data</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
             <section class="connectivity-analysis">
                 <h2>
                     <span class="icon">📊</span>
