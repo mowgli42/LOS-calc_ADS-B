@@ -36,6 +36,10 @@ ENV/
 
 # Debug logs
 .cursor/
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/commands/
+!.cursor/commands/**
 *.log
 debug.log
 
