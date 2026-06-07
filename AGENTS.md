@@ -33,3 +33,16 @@ Binds to `0.0.0.0:5000`. Use `python3` (not `python`) as only `python3` is on PA
 - No automated test suite exists. Validate changes via API calls (`curl`) and/or the web UI at `http://localhost:5000`.
 - No linter is configured in the repo. Use standard Python linting tools (e.g. `python3 -m py_compile <file>`) for basic validation.
 - Dependencies are in `requirements.txt` (Flask, requests). Install with `pip install -r requirements.txt`.
+
+## Issue Tracking
+
+This project uses **bd (beads)** for issue tracking. Run `bd prime` for workflow context, or install hooks with `bd hooks install` for automatic context injection.
+
+Quick reference:
+
+- `bd ready` - find unblocked work
+- `bd create "Title" --type task --priority 2` - create an issue
+- `bd close <id>` - close completed work
+- `bd dolt push` - push Beads data when using a shared Beads remote
+
+For full workflow details, run `bd prime`.

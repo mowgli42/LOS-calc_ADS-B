@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "LOS_calc_ADS_B",
+  "project_id": "e963f8bb-e255-4875-984c-ab0146d90258"
+}
